@@ -29,6 +29,9 @@ typedef int tid_t;
 #define NICE_DEFAULT 0
 #define NICE_MAX 20
 
+struct child_record;
+struct file;
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -113,6 +116,14 @@ struct thread {
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint32_t *pagedir; /* Page directory. */
+  struct list children;       /* Children that this process may wait for. */
+  struct child_record *child_record; /* Shared state with the parent. */
+  struct file *executable;    /* Kept open while the process runs. */
+  char *program_name;         /* Full executable name for exit output. */
+  int exit_status;            /* Status reported to the parent. */
+  bool user_process;          /* Kernel threads do not print exit status. */
+  struct list open_files;     /* This process's file descriptors. */
+  int next_fd;                /* Next descriptor number to allocate. */
 #endif
 
   /* Owned by thread.c. */
