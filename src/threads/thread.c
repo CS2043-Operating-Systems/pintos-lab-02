@@ -78,9 +78,7 @@ bool thread_priority_more(const struct list_elem *a, const struct list_elem *b,
                           void *aux);
 static bool higher_priority_ready(void);
 
-/* compare the two threads priority
-Used by thread_foreach() to check if a thread
-has higher priority than another thread.*/
+/* Orders ready threads and semaphore waiters by effective priority. */
 bool thread_priority_more(const struct list_elem *a, const struct list_elem *b,
                           void *aux UNUSED) {
   const struct thread *ta = list_entry(a, struct thread, elem);
@@ -371,18 +369,25 @@ void thread_foreach(thread_action_func *func, void *aux) {
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
+  enum intr_level old_level;
+  struct list_elem *e;
+  struct thread *cur;
+
   if (thread_mlfqs)
     return;
 
-  struct thread *cur = thread_current();
+  old_level = intr_disable();
+  cur = thread_current();
   cur->base_priority = new_priority;
-
-  /* If we have no donations, or new_priority is higher than our current
-     priority, update our effective priority. */
-  if (list_empty(&cur->donations) || new_priority > cur->priority) {
-    cur->priority = new_priority;
-    thread_preempt_if_needed();
+  cur->priority = new_priority;
+  for (e = list_begin(&cur->donations); e != list_end(&cur->donations);
+       e = list_next(e)) {
+    struct thread *donor = list_entry(e, struct thread, donation_elem);
+    if (donor->priority > cur->priority)
+      cur->priority = donor->priority;
   }
+  intr_set_level(old_level);
+  thread_preempt_if_needed();
 }
 
 /* Returns the current thread's priority. */
@@ -395,7 +400,7 @@ void thread_mlfqs_update_priority(struct thread *t) {
   if (t == idle_thread)
     return;
 
-  int p = PRI_MAX - fp_to_int_round_nearest(fp_div_int(t->recent_cpu, 4)) -
+  int p = PRI_MAX - fp_to_int_round_zero(fp_div_int(t->recent_cpu, 4)) -
           (t->nice * 2);
   if (p > PRI_MAX)
     p = PRI_MAX;
@@ -456,8 +461,10 @@ void thread_set_nice(int new_nice) {
   enum intr_level old_level = intr_disable();
   struct thread *cur = thread_current();
   cur->nice = new_nice;
-  thread_mlfqs_update_priority(cur);
-  thread_resort_ready_list();
+  if (thread_mlfqs) {
+    thread_mlfqs_update_priority(cur);
+    thread_resort_ready_list();
+  }
   intr_set_level(old_level);
   thread_preempt_if_needed();
 }
@@ -498,6 +505,9 @@ int thread_get_recent_cpu(void) {
 static void idle(void *idle_started_ UNUSED) {
   struct semaphore *idle_started = idle_started_;
   idle_thread = thread_current();
+  idle_thread->priority = PRI_MIN;
+  idle_thread->nice = NICE_DEFAULT;
+  idle_thread->recent_cpu = fp_from_int(0);
   sema_up(idle_started);
 
   for (;;) {
@@ -584,6 +594,13 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   }
 
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  list_init(&t->children);
+  list_init(&t->open_files);
+  t->next_fd = 2;
+  t->exit_status = -1;
+#endif
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
