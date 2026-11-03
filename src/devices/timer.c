@@ -171,6 +171,8 @@ static void timer_interrupt(struct intr_frame *args UNUSED) {
   }
 
   thread_tick();
+  /* A newly awakened thread may outrank the interrupted thread. */
+  thread_preempt_if_needed();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
