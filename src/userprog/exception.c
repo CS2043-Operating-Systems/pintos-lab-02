@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
@@ -84,12 +85,8 @@ kill (struct intr_frame *f)
   switch (f->cs)
     {
     case SEL_UCSEG:
-      /* User's code segment, so it's a user exception, as we
-         expected.  Kill the user process.  */
-      printf ("%s: dying due to interrupt %#04x (%s).\n",
-              thread_name (), f->vec_no, intr_name (f->vec_no));
-      intr_dump_frame (f);
-      thread_exit (); 
+      /* The normal process exit path reports the required status. */
+      syscall_exit_process (-1);
 
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
@@ -147,6 +144,9 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+  if (user)
+    syscall_exit_process (-1);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
